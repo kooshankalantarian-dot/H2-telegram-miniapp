@@ -891,6 +891,15 @@ body.tg-mini-app {
 <script>
 const TG = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
 const IS_TELEGRAM = !!(TG && TG.platform && TG.platform !== 'unknown');
+const TG_PLATFORM = IS_TELEGRAM ? String(TG.platform || '').toLowerCase() : '';
+const IS_TELEGRAM_WEB = !!(IS_TELEGRAM && (
+  /^web/.test(TG_PLATFORM) ||
+  (window.self !== window.top && /web\.telegram\.org/i.test(document.referrer || ''))
+));
+
+const EXPORT_BRIDGE_PARAM = 'h2_export_bridge';
+const EXPORT_BRIDGE_ID_PARAM = 'h2_export_id';
+const pendingExportBridges = new Map();
 
 function tgVersionAtLeast(version) {
   try { return !!(TG && typeof TG.isVersionAtLeast === 'function' && TG.isVersionAtLeast(version)); }
@@ -973,8 +982,147 @@ function fallbackDownloadBlob(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
+function makeExportBridgeUrl(id) {
+  const url = new URL(window.location.href);
+  url.searchParams.set(EXPORT_BRIDGE_PARAM, '1');
+  url.searchParams.set(EXPORT_BRIDGE_ID_PARAM, id);
+  url.hash = '';
+  return url.toString();
+}
+
+function openTelegramWebExportBridge(blob, filename, mimeType) {
+  const id = 'exp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+  const bridgeUrl = makeExportBridgeUrl(id);
+  const popup = window.open(bridgeUrl, '_blank');
+
+  if (!popup) {
+    showToast('Chrome blocked the export tab. Allow pop-ups for this site and try again.', 'error');
+    telegramHaptic('error');
+    return false;
+  }
+
+  const timer = setTimeout(() => {
+    const pending = pendingExportBridges.get(id);
+    if (!pending) return;
+    pendingExportBridges.delete(id);
+    showToast('Export tab opened. If download did not start, use the Download button there.', 'error');
+  }, 12000);
+
+  pendingExportBridges.set(id, { popup, blob, filename, mimeType, timer });
+  showToast('Opening download in Chrome…');
+  return true;
+}
+
+function setupExportBridgeMessaging() {
+  window.addEventListener('message', event => {
+    if (event.origin !== window.location.origin || !event.data || typeof event.data !== 'object') return;
+
+    if (event.data.type === 'H2_EXPORT_BRIDGE_READY') {
+      const id = String(event.data.id || '');
+      const pending = pendingExportBridges.get(id);
+      if (!pending) return;
+      if (event.source && pending.popup && event.source !== pending.popup) return;
+      try {
+        pending.popup.postMessage({
+          type: 'H2_EXPORT_FILE',
+          id,
+          filename: pending.filename,
+          mimeType: pending.mimeType,
+          blob: pending.blob
+        }, window.location.origin);
+      } catch (err) {
+        console.error('Export bridge transfer failed:', err);
+        clearTimeout(pending.timer);
+        pendingExportBridges.delete(id);
+        showToast('Could not transfer the file to the download tab.', 'error');
+      }
+      return;
+    }
+
+    if (event.data.type === 'H2_EXPORT_BRIDGE_STARTED') {
+      const id = String(event.data.id || '');
+      const pending = pendingExportBridges.get(id);
+      if (!pending) return;
+      clearTimeout(pending.timer);
+      pendingExportBridges.delete(id);
+      showToast('Download started in Chrome');
+      telegramHaptic('success');
+    }
+  });
+
+  const params = new URLSearchParams(window.location.search);
+  if (params.get(EXPORT_BRIDGE_PARAM) !== '1') return;
+  const id = params.get(EXPORT_BRIDGE_ID_PARAM) || '';
+  if (!id || !window.opener) return;
+
+  const panel = document.createElement('div');
+  panel.setAttribute('role', 'status');
+  Object.assign(panel.style, {
+    position: 'fixed', inset: '20px', zIndex: '99999', display: 'flex',
+    alignItems: 'center', justifyContent: 'center', pointerEvents: 'none'
+  });
+  const card = document.createElement('div');
+  Object.assign(card.style, {
+    pointerEvents: 'auto', width: 'min(520px, 100%)', padding: '24px',
+    borderRadius: '16px', background: '#131a28', color: '#eef2f8',
+    border: '1px solid rgba(255,255,255,.16)', boxShadow: '0 18px 48px rgba(0,0,0,.5)',
+    fontFamily: 'Inter, system-ui, sans-serif', textAlign: 'center'
+  });
+  const title = document.createElement('div');
+  title.textContent = 'Preparing your export…';
+  title.style.fontSize = '18px';
+  title.style.fontWeight = '700';
+  const note = document.createElement('div');
+  note.textContent = 'Keep this tab open for a moment. The download should start automatically.';
+  note.style.marginTop = '10px';
+  note.style.color = '#8b96a8';
+  note.style.fontSize = '13px';
+  const manual = document.createElement('a');
+  manual.textContent = 'Download file';
+  manual.style.display = 'none';
+  manual.style.marginTop = '18px';
+  manual.style.padding = '11px 16px';
+  manual.style.borderRadius = '9px';
+  manual.style.background = '#37c6f0';
+  manual.style.color = '#04121a';
+  manual.style.fontWeight = '700';
+  manual.style.textDecoration = 'none';
+  card.append(title, note, manual);
+  panel.appendChild(card);
+  document.body.appendChild(panel);
+
+  window.addEventListener('message', event => {
+    if (event.origin !== window.location.origin || event.source !== window.opener) return;
+    const data = event.data;
+    if (!data || data.type !== 'H2_EXPORT_FILE' || String(data.id || '') !== id || !(data.blob instanceof Blob)) return;
+
+    const filename = String(data.filename || 'export.bin');
+    const fileBlob = data.blob.type ? data.blob : new Blob([data.blob], { type: data.mimeType || 'application/octet-stream' });
+    const objectUrl = URL.createObjectURL(fileBlob);
+    manual.href = objectUrl;
+    manual.download = filename;
+    manual.style.display = 'inline-block';
+    title.textContent = filename;
+    note.textContent = 'If Chrome did not start the download automatically, click the button below.';
+
+    try { manual.click(); } catch (_) {}
+    try { window.opener.postMessage({ type: 'H2_EXPORT_BRIDGE_STARTED', id }, window.location.origin); } catch (_) {}
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 10 * 60 * 1000);
+  }, { once: true });
+
+  try { window.opener.postMessage({ type: 'H2_EXPORT_BRIDGE_READY', id }, window.location.origin); } catch (_) {}
+}
+
 function deliverGeneratedFile(blob, filename, mimeType) {
   const finalBlob = blob.type ? blob : new Blob([blob], { type: mimeType || 'application/octet-stream' });
+
+  // Telegram Web runs Mini Apps inside a browser iframe. Use a normal top-level
+  // Chrome tab as a download bridge so iframe download restrictions do not eat the file.
+  if (IS_TELEGRAM_WEB) {
+    openTelegramWebExportBridge(finalBlob, filename, mimeType || finalBlob.type);
+    return;
+  }
+
   let file = null;
   try { file = new File([finalBlob], filename, { type: finalBlob.type || mimeType || 'application/octet-stream' }); } catch (_) {}
 
@@ -986,7 +1134,7 @@ function deliverGeneratedFile(blob, filename, mimeType) {
           .catch(err => {
             if (err && err.name === 'AbortError') return;
             fallbackDownloadBlob(finalBlob, filename);
-            showToast('File exported');
+            showToast('Download requested');
           });
         return;
       }
@@ -994,7 +1142,7 @@ function deliverGeneratedFile(blob, filename, mimeType) {
   }
 
   fallbackDownloadBlob(finalBlob, filename);
-  showToast('File exported');
+  showToast('Download requested');
 }
 
 const R = 0.0821;
@@ -1962,6 +2110,7 @@ function finishBoot(restored) {
   showTool('analyzer');
 }
 
+setupExportBridgeMessaging();
 initTelegramMiniApp();
 if (restoreProject()) {
   finishBoot(true);
