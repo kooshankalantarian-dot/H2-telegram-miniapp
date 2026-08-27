@@ -1,0 +1,1985 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>H₂ Production Analyzer</title>
+<script src="https://telegram.org/js/telegram-web-app.js?63"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+:root {
+  /* Core surface & text */
+  --ink: #05070c;
+  --ink-soft: #080b13;
+  --panel: #0e1420;
+  --panel-raised: #131a28;
+  --line: rgba(255,255,255,0.08);
+  --line-strong: rgba(255,255,255,0.16);
+  --frost: #eef2f8;
+  --mist: #8b96a8;
+  --haze: #545e70;
+
+  /* Identity accents */
+  --photon: #37c6f0;
+  --photon-dim: rgba(55,198,240,0.12);
+  --violet: #9b8cf2;
+  --violet-dim: rgba(155,140,242,0.12);
+
+  /* Semantic state */
+  --signal: #34d399;
+  --signal-dim: rgba(52,211,153,0.13);
+  --amber: #f2b84f;
+  --amber-dim: rgba(242,184,79,0.13);
+  --crimson: #f0637a;
+  --crimson-dim: rgba(240,99,122,0.12);
+
+  /* Geometry & motion */
+  --r-lg: 18px;
+  --r-md: 12px;
+  --r-sm: 9px;
+  --shadow-soft: 0 8px 28px rgba(0,0,0,0.35);
+  --shadow-lift: 0 18px 48px rgba(0,0,0,0.5);
+  --ease: 0.18s cubic-bezier(0.4,0,0.2,1);
+
+  /* Type */
+  --font-display: 'IBM Plex Sans', 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Menlo, Consolas, monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { color-scheme: dark; min-height: 100%; background: var(--ink); }
+html[data-tg-color-scheme="light"] { color-scheme: light; }
+html, body { min-height: 100%; overscroll-behavior-y: contain; }
+
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  min-height: var(--tg-viewport-stable-height, 100dvh);
+  font-family: var(--font-body);
+  color: var(--frost);
+  background: var(--ink);
+  background-image:
+    radial-gradient(ellipse 70% 45% at 15% -8%, rgba(55,198,240,0.07), transparent 60%),
+    radial-gradient(ellipse 55% 38% at 92% 4%, rgba(155,140,242,0.06), transparent 60%);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  -webkit-tap-highlight-color: transparent;
+  padding-top: max(env(safe-area-inset-top, 0px), var(--tg-content-safe-area-inset-top, 0px));
+  padding-right: max(env(safe-area-inset-right, 0px), var(--tg-content-safe-area-inset-right, 0px));
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-content-safe-area-inset-bottom, 0px));
+  padding-left: max(env(safe-area-inset-left, 0px), var(--tg-content-safe-area-inset-left, 0px));
+}
+
+button, input, select { touch-action: manipulation; }
+
+:focus-visible { outline: 2px solid var(--photon); outline-offset: 2px; border-radius: 4px; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+/* ============ APP SHELL ============ */
+.app-shell {
+  display: grid;
+  grid-template-columns: 272px 1fr;
+  align-items: start;
+  min-height: 100vh;
+  min-height: 100dvh;
+  min-height: var(--tg-viewport-stable-height, 100dvh);
+}
+
+/* ---- Sidebar ---- */
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--ink-soft);
+  border-right: 1px solid var(--line);
+  padding: 22px 0 18px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px 20px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.brand-mark {
+  flex-shrink: 0;
+  width: 40px; height: 40px;
+  border-radius: 11px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(155deg, rgba(55,198,240,0.20), rgba(55,198,240,0.04));
+  border: 1px solid rgba(55,198,240,0.32);
+  color: var(--photon);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+}
+.brand-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.brand-eyebrow {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--haze); white-space: nowrap;
+}
+.brand-name {
+  font-family: var(--font-display); font-size: 14.5px; font-weight: 600;
+  color: var(--frost); line-height: 1.25; white-space: nowrap;
+}
+
+.module-nav { display: flex; flex-direction: column; gap: 5px; padding: 0 14px; }
+.nav-item {
+  display: flex; align-items: center; gap: 11px;
+  width: 100%;
+  padding: 11px 13px;
+  border-radius: var(--r-sm);
+  background: transparent;
+  border: 1px solid transparent;
+  border-left: 2.5px solid transparent;
+  color: var(--mist);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--ease), color var(--ease), border-color var(--ease);
+}
+.nav-item:hover { background: rgba(255,255,255,0.035); color: var(--frost); }
+.nav-icon { flex-shrink: 0; width: 19px; height: 19px; }
+.nav-icon svg { display: block; width: 100%; height: 100%; }
+.nav-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.nav-title { font-size: 13px; font-weight: 600; color: inherit; white-space: nowrap; }
+.nav-sub {
+  font-size: 10px; font-weight: 600; color: var(--haze);
+  text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap;
+}
+#analyzerTab.active { background: var(--photon-dim); border-left-color: var(--photon); color: var(--photon); }
+#aqyTab.active { background: var(--violet-dim); border-left-color: var(--violet); color: var(--violet); }
+
+.nav-branch { position: relative; margin-left: 23px; padding-left: 15px; }
+.nav-branch::before {
+  content: ''; position: absolute; left: 0; top: -7px; bottom: 20px;
+  width: 1px; background: var(--line-strong);
+}
+.nav-branch::after {
+  content: ''; position: absolute; left: 0; top: 20px;
+  width: 12px; height: 1px; background: var(--line-strong);
+}
+
+.sidebar-footer { margin-top: auto; padding: 18px 20px 4px; border-top: 1px solid var(--line); }
+.sidebar-note { font-size: 11.5px; color: var(--haze); line-height: 1.6; }
+
+/* ---- Main workspace ---- */
+.main { min-width: 0; }
+.workspace {
+  max-width: 1560px;
+  margin: 0 auto;
+  padding: 30px 34px 64px;
+}
+
+.tool-view.hidden, .hidden { display: none !important; }
+
+.view-header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 20px; flex-wrap: wrap; margin-bottom: 24px;
+}
+.eyebrow {
+  font-family: var(--font-display); font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em; color: var(--photon);
+  margin-bottom: 9px;
+}
+#aqyView .eyebrow { color: var(--violet); }
+.view-header h1 {
+  font-family: var(--font-display); font-size: 27px; font-weight: 600;
+  letter-spacing: -0.02em; color: var(--frost); margin-bottom: 9px;
+}
+.view-sub { font-size: 13.5px; color: var(--mist); max-width: 620px; line-height: 1.65; }
+
+.workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 420px) 1fr;
+  gap: 20px;
+  align-items: start;
+}
+.col-config, .col-results { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+
+/* ============ PANELS ============ */
+.panel {
+  display: flex; flex-direction: column; gap: 20px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 22px;
+  box-shadow: var(--shadow-soft);
+  transition: border-color var(--ease);
+}
+.panel:hover { border-color: var(--line-strong); }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.panel h2 {
+  font-family: var(--font-display); font-size: 12.5px; font-weight: 600;
+  letter-spacing: 0.05em; text-transform: uppercase; color: var(--mist);
+}
+
+.field-stack { display: flex; flex-direction: column; gap: 14px; }
+.field label {
+  display: block; font-size: 12px; font-weight: 600; color: var(--mist); margin-bottom: 7px;
+}
+.hint { font-size: 12px; color: var(--haze); line-height: 1.65; }
+.hint b, .hint strong { color: var(--mist); font-weight: 600; }
+.hint.mono { font-family: var(--font-mono); color: var(--mist); font-variant-numeric: tabular-nums; }
+
+/* ============ FORM CONTROLS ============ */
+input[type="number"], input[type="text"], select {
+  width: 100%;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--line);
+  color: var(--frost);
+  border-radius: var(--r-sm);
+  padding: 11px 13px;
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  transition: border-color var(--ease), box-shadow var(--ease), background var(--ease);
+}
+input:hover, select:hover { border-color: var(--line-strong); background: rgba(255,255,255,0.045); }
+input:focus, select:focus {
+  border-color: var(--photon);
+  box-shadow: 0 0 0 3px var(--photon-dim);
+  background: rgba(255,255,255,0.05);
+}
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { opacity: 0.4; filter: invert(0.85); }
+
+select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%238b96a8' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 13px center;
+  padding-right: 38px;
+}
+select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.hiddenCalc { display: none !important; }
+
+/* ============ BUTTONS ============ */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  width: auto;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: 11px 16px;
+  font-family: var(--font-body);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--ease), border-color var(--ease), color var(--ease), box-shadow var(--ease), transform var(--ease), filter var(--ease);
+}
+.btn:active { transform: scale(0.98); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+.btn-block { width: 100%; }
+.btn-sm { padding: 7px 12px; font-size: 12px; }
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--photon) 0%, #22a9d4 100%);
+  color: #04121a;
+  box-shadow: 0 2px 14px rgba(55,198,240,0.22);
+}
+.btn-primary:hover:not(:disabled) { filter: brightness(1.06); box-shadow: 0 4px 20px rgba(55,198,240,0.32); }
+
+.btn-tonal {
+  background: var(--violet-dim); color: var(--violet); border-color: rgba(155,140,242,0.28);
+}
+.btn-tonal:hover:not(:disabled) { background: rgba(155,140,242,0.2); border-color: rgba(155,140,242,0.45); }
+
+.btn-outline {
+  background: rgba(255,255,255,0.03); color: var(--mist); border-color: var(--line);
+}
+.btn-outline:hover:not(:disabled) { background: rgba(255,255,255,0.06); color: var(--frost); border-color: var(--line-strong); }
+
+.btn-outline-danger {
+  background: rgba(240,99,122,0.06); color: var(--crimson); border-color: rgba(240,99,122,0.22);
+}
+.btn-outline-danger:hover:not(:disabled) { background: var(--crimson-dim); border-color: rgba(240,99,122,0.45); }
+
+.panel-actions { display: flex; flex-direction: column; gap: 10px; }
+.panel-actions.two-col { display: grid; grid-template-columns: 1fr 1fr; }
+
+/* ============ TABLES ============ */
+.table-scroll {
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+}
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th {
+  position: sticky; top: 0;
+  background: var(--panel-raised);
+  color: var(--mist);
+  font-family: var(--font-display);
+  font-weight: 600; font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  padding: 11px 13px;
+  text-align: left; white-space: nowrap;
+  border-bottom: 1px solid var(--line);
+}
+td {
+  padding: 9px 13px;
+  color: var(--frost);
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  white-space: nowrap;
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: rgba(255,255,255,0.02); }
+
+.entry-table th:nth-child(1), .entry-table th:nth-child(2) { width: 42%; }
+.entry-table th:last-child { width: 60px; }
+.entry-table td:last-child { text-align: center; }
+.entry-table input {
+  padding: 8px 10px;
+  font-size: 13px;
+  border-radius: 7px;
+  font-family: var(--font-mono);
+}
+
+.rowDelete {
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--crimson-dim); color: var(--crimson);
+  border: 1px solid rgba(240,99,122,0.22);
+  border-radius: 8px;
+  font-size: 15px; font-weight: 700; line-height: 1;
+  cursor: pointer;
+  transition: background var(--ease), border-color var(--ease);
+}
+.rowDelete:hover { background: rgba(240,99,122,0.22); border-color: rgba(240,99,122,0.4); }
+
+#summaryBody td:first-child { font-family: var(--font-body); font-weight: 500; }
+#summaryBody td:not(:first-child) {
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  color: var(--frost); font-size: 12.5px;
+}
+
+.table-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
+.table-scroll::-webkit-scrollbar-track { background: transparent; }
+.table-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+.table-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+.sidebar::-webkit-scrollbar { width: 5px; }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
+.sidebar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+
+/* ============ METRICS / INSTRUMENT READOUTS ============ */
+.metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.metric-readout {
+  position: relative;
+  overflow: hidden;
+  background: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 15px 14px;
+  transition: border-color var(--ease), background var(--ease);
+}
+.metric-readout::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: var(--line-strong);
+}
+.metric-readout.accent::before { background: linear-gradient(90deg, var(--photon), var(--violet)); }
+.metric-readout:hover { border-color: var(--line-strong); background: rgba(255,255,255,0.02); }
+.mr-label {
+  display: block; font-size: 10.5px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.055em; color: var(--haze); margin-bottom: 9px;
+}
+.mr-value {
+  display: block; font-family: var(--font-mono); font-size: 21px; font-weight: 600;
+  color: var(--frost); font-variant-numeric: tabular-nums; letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.mr-unit { display: block; font-size: 10.5px; color: var(--haze); margin-top: 5px; }
+
+.charts-stack { display: flex; flex-direction: column; gap: 20px; }
+.chart-block { display: flex; flex-direction: column; gap: 10px; }
+.chart-label {
+  font-family: var(--font-display); font-size: 11px; font-weight: 600; color: var(--mist);
+  text-transform: uppercase; letter-spacing: 0.045em;
+}
+.chart-panel {
+  position: relative; height: 300px;
+  background: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 14px;
+}
+
+/* ============ STATUS PILL ============ */
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 11px; font-weight: 700; letter-spacing: 0.02em;
+  background: var(--signal-dim); color: var(--signal);
+  border: 1px solid rgba(52,211,153,0.25);
+  white-space: nowrap;
+}
+.pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+.pill.idle { background: rgba(255,255,255,0.05); color: var(--haze); border-color: var(--line); }
+.pill.warn { background: var(--amber-dim); color: var(--amber); border-color: rgba(242,184,79,0.3); }
+
+/* ============ AQY MODULE ============ */
+.switcher-field { max-width: 440px; }
+.switcher-field .hint { margin-top: 8px; }
+
+.aqy-source-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 12px; }
+.source-card {
+  background: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 15px 14px;
+  min-width: 0;
+}
+.sc-label {
+  display: block; font-size: 10.5px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.055em; color: var(--haze); margin-bottom: 9px;
+}
+.sc-value {
+  display: block; font-family: var(--font-mono); font-size: 17px; font-weight: 600;
+  color: var(--frost); font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+}
+.sc-note { display: block; font-size: 10.5px; color: var(--haze); margin-top: 5px; }
+
+.aqy-result-grid { display: grid; grid-template-columns: 240px 1fr; gap: 18px; align-items: stretch; }
+.aqy-hero-readout {
+  position: relative;
+  display: flex; flex-direction: column; justify-content: center;
+  min-height: 160px;
+  padding: 24px;
+  border-radius: var(--r-lg);
+  background: linear-gradient(160deg, rgba(55,198,240,0.11), rgba(155,140,242,0.08));
+  border: 1px solid rgba(55,198,240,0.22);
+}
+.ahr-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--mist);
+}
+.ahr-value {
+  margin-top: 10px;
+  font-family: var(--font-mono); font-size: 40px; font-weight: 600;
+  letter-spacing: -0.02em; color: var(--frost); font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.aqy-detail-card {
+  padding: 18px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--line);
+  background: rgba(255,255,255,0.02);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.aqy-detail-card .panel-actions { margin-top: 6px; }
+
+/* ============ TELEGRAM / MOBILE UX ============ */
+body.tg-mini-app {
+  background-color: var(--ink);
+}
+
+.tg-platform-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--haze);
+}
+
+.app-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  padding-top: max(20px, env(safe-area-inset-top, 0px), var(--tg-content-safe-area-inset-top, 0px));
+  padding-bottom: max(20px, env(safe-area-inset-bottom, 0px), var(--tg-content-safe-area-inset-bottom, 0px));
+  background: rgba(0,0,0,0.62);
+}
+.app-modal.hidden { display: none !important; }
+.app-modal-card {
+  width: min(420px, 100%);
+  background: var(--panel-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-lift);
+}
+.app-modal-title {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 7px;
+}
+.app-modal-sub { color: var(--mist); font-size: 12.5px; margin-bottom: 14px; }
+.app-modal-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+
+@supports (-webkit-touch-callout: none) {
+  input[type="number"], input[type="text"], select { font-size: 16px; }
+  .entry-table input { font-size: 16px; }
+}
+
+/* ============ TOAST ============ */
+.toast {
+  position: fixed;
+  bottom: 24px; right: 24px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 13px 18px 13px 42px;
+  background: var(--panel-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  font-size: 13px; font-weight: 600; color: var(--frost);
+  box-shadow: var(--shadow-lift);
+  z-index: 1000;
+  opacity: 0;
+  transform: translateY(10px) scale(0.98);
+  transition: opacity 0.25s var(--ease), transform 0.25s var(--ease);
+  pointer-events: none;
+}
+.toast.show { opacity: 1; transform: translateY(0) scale(1); }
+.toast::before {
+  content: ''; position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
+  font-size: 14px; font-weight: 800;
+}
+.toast.success { border-color: rgba(52,211,153,0.35); }
+.toast.success::before { content: '\2713'; color: var(--signal); }
+.toast.error { border-color: rgba(240,99,122,0.35); }
+.toast.error::before { content: '!'; color: var(--crimson); }
+
+/* ============ RESPONSIVE ============ */
+@media (max-width: 1180px) {
+  .workspace-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 900px) {
+  .app-shell { display: block; }
+  .sidebar {
+    position: sticky; top: 0; height: auto; max-height: none; overflow: visible;
+    display: grid; grid-template-columns: 1fr;
+    padding: 10px 12px; z-index: 50;
+    background: rgba(8,11,19,0.96);
+    border-right: none; border-bottom: 1px solid var(--line);
+  }
+  .brand { border-bottom: none; padding: 0 2px 8px; margin: 0; }
+  .brand-mark { width: 34px; height: 34px; border-radius: 9px; }
+  .brand-eyebrow { display: none; }
+  .module-nav { display: grid; grid-template-columns: 1fr 1fr; padding: 0; gap: 8px; width: 100%; }
+  .nav-item { min-height: 44px; justify-content: center; padding: 9px 10px; }
+  .nav-branch { margin-left: 0; padding-left: 0; }
+  .nav-branch::before, .nav-branch::after { display: none; }
+  .nav-sub { display: none; }
+  .sidebar-footer { display: none; }
+  .workspace { padding: 18px 16px 48px; }
+  .aqy-source-grid { grid-template-columns: 1fr 1fr; }
+  .aqy-result-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  .workspace { padding: 18px 14px 44px; }
+  .view-header h1 { font-size: 21px; }
+  .metrics-grid { grid-template-columns: 1fr 1fr; }
+  .row, .panel-actions.two-col { grid-template-columns: 1fr; }
+  .chart-panel { height: 250px; }
+  .mr-value { font-size: 18px; }
+  .aqy-source-grid { grid-template-columns: 1fr; }
+  .ahr-value { font-size: 32px; }
+  .panel { padding: 18px; }
+  .nav-sub { display: none; }
+  input[type="number"], input[type="text"], select { font-size: 16px; }
+  .entry-table input { font-size: 16px; }
+  .btn { min-height: 44px; }
+  .toast { left: 16px; right: 16px; max-width: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+</style>
+</head>
+
+<body>
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">H₂</div>
+      <div class="brand-text">
+        <span class="brand-eyebrow">Photocatalysis Toolkit</span>
+        <span class="brand-name">Production Analyzer</span>
+      </div>
+    </div>
+
+    <nav class="module-nav" aria-label="Analyzer modules">
+      <button type="button" class="nav-item active" id="analyzerTab">
+        <span class="nav-icon" aria-hidden="true">
+          <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="6.4" cy="10" r="3.3" stroke="currentColor" stroke-width="1.6"/>
+            <circle cx="13.6" cy="10" r="3.3" stroke="currentColor" stroke-width="1.6"/>
+            <line x1="9.3" y1="10" x2="10.7" y2="10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <span class="nav-text">
+          <span class="nav-title">Hydrogen Production</span>
+          <span class="nav-sub">Analyzer</span>
+        </span>
+      </button>
+      <div class="nav-branch">
+        <button type="button" class="nav-item" id="aqyTab">
+          <span class="nav-icon" aria-hidden="true">
+            <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="10" cy="10" r="3.4" stroke="currentColor" stroke-width="1.6"/>
+              <line x1="14.2" y1="10" x2="18.2" y2="10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <line x1="12.97" y1="12.97" x2="15.8" y2="15.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <line x1="10" y1="14.2" x2="10" y2="18.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <line x1="7.03" y1="12.97" x2="4.2" y2="15.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <line x1="5.8" y1="10" x2="1.8" y2="10" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <line x1="7.03" y1="7.03" x2="4.2" y2="4.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <line x1="10" y1="5.8" x2="10" y2="1.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              <line x1="12.97" y1="7.03" x2="15.8" y2="4.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="nav-text">
+            <span class="nav-title">AQY Calculator</span>
+            <span class="nav-sub">Sub-module</span>
+          </span>
+        </button>
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <p class="sidebar-note">Hydrogen Production and AQY always analyze the same active sample — switch it from either module.</p>
+      <span class="tg-platform-badge" id="tgPlatformInfo">Web mode</span>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="workspace">
+
+      <div class="tool-view" id="analyzerView">
+        <header class="view-header">
+          <div>
+            <p class="eyebrow">Photocatalysis · Primary module</p>
+            <h1>Hydrogen Production Analyzer</h1>
+            <p class="view-sub">Enter sample names, irradiation time points, and GC-measured H₂ concentrations. Calculation method and constants are documented in full inside the exported workbook.</p>
+          </div>
+          <div class="pill idle" id="status">Ready</div>
+        </header>
+
+        <div class="workspace-grid">
+          <div class="col-config">
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Sample Configuration</h2>
+                <button type="button" class="btn btn-tonal btn-sm" id="addSampleBtn">+ Add Sample</button>
+              </div>
+              <div class="field-stack">
+                <div class="field">
+                  <label for="sampleSelect">Select sample</label>
+                  <select id="sampleSelect"></select>
+                </div>
+                <div class="field">
+                  <label for="mass">Photocatalyst amount (g)</label>
+                  <input id="mass" type="number" step="any" value="0.05" min="0" inputmode="decimal">
+                </div>
+                <div class="field hiddenCalc">
+                  <label for="vol">Gas volume (mL)</label>
+                  <input id="vol" type="number" step="any" value="375">
+                </div>
+                <div class="row hiddenCalc">
+                  <div class="field">
+                    <label for="temp">Temperature (K)</label>
+                    <input id="temp" type="number" step="any" value="298">
+                  </div>
+                  <div class="field">
+                    <label for="pressure">Pressure (atm)</label>
+                    <input id="pressure" type="number" step="any" value="1">
+                  </div>
+                </div>
+              </div>
+              <div class="panel-actions">
+                <button type="button" class="btn btn-primary btn-block" id="saveSampleBtn">Save Sample</button>
+                <button type="button" class="btn btn-outline-danger btn-block" id="deleteSampleBtn">Delete Selected Sample</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <h2>Manual Data Entry</h2>
+              <p class="hint">Enter each measurement as one row. Time is in minutes; ppm is the value reported by the GC.</p>
+              <div class="table-scroll">
+                <table class="entry-table">
+                  <thead>
+                    <tr><th scope="col">Time (min)</th><th scope="col">H₂ (ppm)</th><th scope="col"><span class="sr-only">Row actions</span></th></tr>
+                  </thead>
+                  <tbody id="entryBody"></tbody>
+                </table>
+              </div>
+              <div class="panel-actions two-col">
+                <button type="button" class="btn btn-outline" id="addRowBtn">+ Add Row</button>
+                <button type="button" class="btn btn-primary" id="calculateBtn">Calculate</button>
+              </div>
+            </section>
+
+            <section class="panel">
+              <h2>Export</h2>
+              <p class="hint">Excel includes results, raw data, and a Conditions sheet with method, constants, and assumptions. PDF generates a clean single-sample report.</p>
+              <div class="panel-actions two-col">
+                <button type="button" class="btn btn-primary" id="excelBtn">Export Excel</button>
+                <button type="button" class="btn btn-outline" id="pdfBtn">Export PDF</button>
+              </div>
+            </section>
+
+          </div>
+
+          <div class="col-results">
+
+            <section class="panel">
+              <div class="panel-head">
+                <h2>Results</h2>
+              </div>
+              <div class="metrics-grid">
+                <div class="metric-readout">
+                  <span class="mr-label">Final H₂</span>
+                  <span class="mr-value" id="finalH2">—</span>
+                  <span class="mr-unit">µmol</span>
+                </div>
+                <div class="metric-readout accent">
+                  <span class="mr-label">Production Rate</span>
+                  <span class="mr-value" id="finalRate">—</span>
+                  <span class="mr-unit">µmol g⁻¹ h⁻¹</span>
+                </div>
+                <div class="metric-readout">
+                  <span class="mr-label">H₂ Dosage</span>
+                  <span class="mr-value" id="finalDosage">—</span>
+                  <span class="mr-unit">µmol/g</span>
+                </div>
+                <div class="metric-readout">
+                  <span class="mr-label">Final GC</span>
+                  <span class="mr-value" id="finalPPM">—</span>
+                  <span class="mr-unit">ppm corrected</span>
+                </div>
+              </div>
+              <div class="charts-stack">
+                <div class="chart-block">
+                  <p class="chart-label">H₂ Evolution Over Time</p>
+                  <div class="chart-panel"><canvas id="chart"></canvas></div>
+                </div>
+                <div class="chart-block">
+                  <p class="chart-label">Production Rate by Sample</p>
+                  <div class="chart-panel"><canvas id="rateChart"></canvas></div>
+                </div>
+              </div>
+            </section>
+
+            <section class="panel">
+              <h2>Samples Summary</h2>
+              <p class="hint">Every saved sample with valid data appears here for quick comparison.</p>
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th scope="col">Sample</th>
+                      <th scope="col">Final H₂ (µmol)</th>
+                      <th scope="col">Dosage (µmol/g)</th>
+                      <th scope="col">Rate (µmol g⁻¹ h⁻¹)</th>
+                      <th scope="col">Final ppm</th>
+                    </tr>
+                  </thead>
+                  <tbody id="summaryBody"></tbody>
+                </table>
+              </div>
+            </section>
+
+          </div>
+        </div>
+      </div>
+
+      <section class="tool-view hidden" id="aqyView" aria-labelledby="aqyHeading">
+        <header class="view-header">
+          <div>
+            <p class="eyebrow">Photocatalysis · Sub-module of Hydrogen Production</p>
+            <h1 id="aqyHeading">Apparent Quantum Yield</h1>
+            <p class="view-sub">AQY is synchronized automatically from the active sample. It uses the <b>final calculated H₂ production rate (µmol g⁻¹ h⁻¹)</b> from the last valid Manual Data Entry row, together with the synchronized <b>Photocatalyst amount (g)</b>.</p>
+          </div>
+          <div class="pill idle" id="aqyStatus">Waiting for data</div>
+        </header>
+
+        <section class="panel">
+          <div class="field switcher-field">
+            <label for="aqySampleSelect">Select sample</label>
+            <select id="aqySampleSelect"></select>
+            <p class="hint">Changing the sample updates AQY instantly using that sample's saved project data.</p>
+          </div>
+
+          <div class="aqy-source-grid">
+            <div class="source-card">
+              <span class="sc-label">Sample</span>
+              <span class="sc-value" id="aqySample">—</span>
+              <span class="sc-note">selected analyzer sample</span>
+            </div>
+            <div class="source-card">
+              <span class="sc-label">Final H₂ Production Rate</span>
+              <span class="sc-value" id="aqyRate">—</span>
+              <span class="sc-note">µmol g⁻¹ h⁻¹ · last calculated value</span>
+            </div>
+            <div class="source-card">
+              <span class="sc-label">Photocatalyst Mass</span>
+              <span class="sc-value" id="aqyMass">—</span>
+              <span class="sc-note">g · synchronized</span>
+            </div>
+          </div>
+
+          <div class="aqy-result-grid">
+            <div class="aqy-hero-readout">
+              <span class="ahr-label">Final AQY</span>
+              <span class="ahr-value" id="aqyValue">—</span>
+            </div>
+            <div class="aqy-detail-card">
+              <p class="hint" id="aqyNote">Enter valid Manual Data Entry values in Hydrogen Production, then calculate AQY.</p>
+              <p class="hint"><b>Fixed optical conditions:</b> 450 nm wavelength, 30.30 W lamp power, 2 lamps, 8 cm distance, 80 cm² illuminated sample area, 120° beam angle.</p>
+              <p class="hint mono" id="aqyIntermediate">H₂ mol/h: — &nbsp;•&nbsp; Photon input: —</p>
+              <div class="panel-actions two-col">
+                <button type="button" class="btn btn-primary" id="aqyCalcBtn">Calculate / Refresh AQY</button>
+                <button type="button" class="btn btn-outline" id="aqyPdfBtn" disabled>Export AQY PDF</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<div class="app-modal hidden" id="sampleNameModal" role="dialog" aria-modal="true" aria-labelledby="sampleNameTitle">
+  <div class="app-modal-card">
+    <h2 class="app-modal-title" id="sampleNameTitle">Add sample</h2>
+    <p class="app-modal-sub">Enter a name for the new photocatalyst sample.</p>
+    <input id="sampleNameInput" type="text" maxlength="80" autocomplete="off" enterkeyhint="done" placeholder="Sample name">
+    <div class="app-modal-actions">
+      <button type="button" class="btn btn-outline" id="sampleNameCancel">Cancel</button>
+      <button type="button" class="btn btn-primary" id="sampleNameSave">Add Sample</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const TG = (window.Telegram && window.Telegram.WebApp) ? window.Telegram.WebApp : null;
+const IS_TELEGRAM = !!(TG && TG.platform && TG.platform !== 'unknown');
+
+function tgVersionAtLeast(version) {
+  try { return !!(TG && typeof TG.isVersionAtLeast === 'function' && TG.isVersionAtLeast(version)); }
+  catch (_) { return false; }
+}
+
+function updateTelegramViewportVar() {
+  if (!TG) return;
+  const h = Number(TG.viewportStableHeight || TG.viewportHeight || 0);
+  if (h > 0) document.documentElement.style.setProperty('--app-tg-height', h + 'px');
+}
+
+function applyTelegramChrome() {
+  if (!TG) return;
+  document.documentElement.dataset.tgColorScheme = TG.colorScheme || 'dark';
+  document.documentElement.dataset.tgPlatform = TG.platform || 'unknown';
+  if (IS_TELEGRAM) document.body.classList.add('tg-mini-app');
+  const badge = document.getElementById('tgPlatformInfo');
+  if (badge) badge.textContent = IS_TELEGRAM ? ('Telegram · ' + (TG.platform || 'client') + ' · API ' + (TG.version || '?')) : 'Web mode';
+  try { TG.setHeaderColor('#05070c'); } catch (_) {}
+  try { TG.setBackgroundColor('#05070c'); } catch (_) {}
+  if (tgVersionAtLeast('7.10')) {
+    try { TG.setBottomBarColor('#05070c'); } catch (_) {}
+  }
+  updateTelegramViewportVar();
+}
+
+function telegramHaptic(kind = 'light') {
+  if (!IS_TELEGRAM || !TG.HapticFeedback) return;
+  try {
+    if (kind === 'success' || kind === 'error' || kind === 'warning') TG.HapticFeedback.notificationOccurred(kind);
+    else TG.HapticFeedback.impactOccurred(kind);
+  } catch (_) {}
+}
+
+function hideTelegramKeyboard() {
+  if (IS_TELEGRAM && tgVersionAtLeast('9.1') && typeof TG.hideKeyboard === 'function') {
+    try { TG.hideKeyboard(); } catch (_) {}
+  }
+  if (document.activeElement && typeof document.activeElement.blur === 'function') document.activeElement.blur();
+}
+
+function confirmAction(message, callback) {
+  if (IS_TELEGRAM && tgVersionAtLeast('6.2') && typeof TG.showConfirm === 'function') {
+    TG.showConfirm(message, ok => callback(!!ok));
+  } else {
+    callback(window.confirm(message));
+  }
+}
+
+function initTelegramMiniApp() {
+  if (!TG) return;
+  applyTelegramChrome();
+  try { TG.ready(); } catch (_) {}
+  try { TG.expand(); } catch (_) {}
+  if (tgVersionAtLeast('7.7') && typeof TG.enableVerticalSwipes === 'function') {
+    try { TG.enableVerticalSwipes(); } catch (_) {}
+  }
+  if (TG.BackButton && typeof TG.BackButton.onClick === 'function') {
+    TG.BackButton.onClick(() => showTool('analyzer'));
+  }
+  if (typeof TG.onEvent === 'function') {
+    TG.onEvent('themeChanged', applyTelegramChrome);
+    TG.onEvent('viewportChanged', updateTelegramViewportVar);
+    TG.onEvent('safeAreaChanged', updateTelegramViewportVar);
+    TG.onEvent('contentSafeAreaChanged', updateTelegramViewportVar);
+  }
+}
+
+function fallbackDownloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+function deliverGeneratedFile(blob, filename, mimeType) {
+  const finalBlob = blob.type ? blob : new Blob([blob], { type: mimeType || 'application/octet-stream' });
+  let file = null;
+  try { file = new File([finalBlob], filename, { type: finalBlob.type || mimeType || 'application/octet-stream' }); } catch (_) {}
+
+  if (file && navigator.share && navigator.canShare) {
+    try {
+      if (navigator.canShare({ files: [file] })) {
+        navigator.share({ files: [file], title: filename })
+          .then(() => { showToast('File ready in the system share sheet'); telegramHaptic('success'); })
+          .catch(err => {
+            if (err && err.name === 'AbortError') return;
+            fallbackDownloadBlob(finalBlob, filename);
+            showToast('File exported');
+          });
+        return;
+      }
+    } catch (_) {}
+  }
+
+  fallbackDownloadBlob(finalBlob, filename);
+  showToast('File exported');
+}
+
+const R = 0.0821;
+let samples = [];
+let selectedIndex = -1;
+let chart = null;
+let rateChart = null;
+let lastResults = null;
+const PROJECT_STORAGE_KEY = 'h2AnalyzerProject_v2';
+
+const el = id => document.getElementById(id);
+
+function uid() {
+  return 's_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+function showToast(msg, type = 'success') {
+  const t = el('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+function setStatus(text, state = 'ok') {
+  const s = el('status');
+  s.textContent = text;
+  s.className = 'pill' + (state === 'idle' ? ' idle' : state === 'warn' ? ' warn' : '');
+}
+
+function addDefaultRow(t = '', ppm = '') {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input class="timeInput" type="number" step="any" inputmode="decimal" enterkeyhint="next" value="${t}" placeholder="0"></td>
+    <td><input class="ppmInput" type="number" step="any" inputmode="decimal" enterkeyhint="done" value="${ppm}" placeholder="0"></td>
+    <td><button class="rowDelete" title="Delete row" type="button">×</button></td>`;
+  tr.querySelector('.rowDelete').addEventListener('click', () => tr.remove());
+  el('entryBody').appendChild(tr);
+}
+
+function getRowsFromUI() {
+  return [...document.querySelectorAll('#entryBody tr')].map(tr => {
+    const t = parseFloat(tr.querySelector('.timeInput').value);
+    const ppm = parseFloat(tr.querySelector('.ppmInput').value);
+    return { time: t, ppm: ppm };
+  }).filter(r => Number.isFinite(r.time) && Number.isFinite(r.ppm));
+}
+
+function setRows(rows) {
+  el('entryBody').innerHTML = '';
+  if (!rows.length) addDefaultRow();
+  else rows.forEach(r => addDefaultRow(r.time, r.ppm));
+}
+
+function serializeProject() {
+  return JSON.stringify({
+    samples,
+    selectedId: selectedIndex >= 0 && samples[selectedIndex] ? samples[selectedIndex].id : null
+  });
+}
+
+function applyProject(project) {
+  if (!project || !Array.isArray(project.samples) || !project.samples.length) return false;
+  samples = project.samples.map((s, i) => ({
+    id: s.id || uid(),
+    name: String(s.name || ('Sample ' + (i + 1))),
+    mass: Number.isFinite(Number(s.mass)) ? Number(s.mass) : 0.05,
+    vol: Number.isFinite(Number(s.vol)) ? Number(s.vol) : 375,
+    temp: Number.isFinite(Number(s.temp)) ? Number(s.temp) : 298,
+    pressure: Number.isFinite(Number(s.pressure)) ? Number(s.pressure) : 1,
+    rows: Array.isArray(s.rows) ? s.rows
+      .map(r => ({ time: Number(r.time), ppm: Number(r.ppm) }))
+      .filter(r => Number.isFinite(r.time) && Number.isFinite(r.ppm)) : []
+  }));
+  const restoredIndex = project.selectedId ? samples.findIndex(s => s.id === project.selectedId) : 0;
+  selectedIndex = restoredIndex >= 0 ? restoredIndex : 0;
+  return true;
+}
+
+let telegramPersistTimer = null;
+function persistProject(flushTelegram = false) {
+  const raw = serializeProject();
+  try { localStorage.setItem(PROJECT_STORAGE_KEY, raw); }
+  catch (err) { console.warn('Local project persistence unavailable:', err); }
+
+  if (IS_TELEGRAM && tgVersionAtLeast('9.0') && TG.DeviceStorage && typeof TG.DeviceStorage.setItem === 'function') {
+    const writeTelegramStorage = () => {
+      telegramPersistTimer = null;
+      try { TG.DeviceStorage.setItem(PROJECT_STORAGE_KEY, raw, () => {}); }
+      catch (err) { console.warn('Telegram DeviceStorage unavailable:', err); }
+    };
+    clearTimeout(telegramPersistTimer);
+    if (flushTelegram) writeTelegramStorage();
+    else telegramPersistTimer = setTimeout(writeTelegramStorage, 350);
+  }
+}
+
+function restoreProject() {
+  try {
+    const raw = localStorage.getItem(PROJECT_STORAGE_KEY);
+    if (!raw) return false;
+    return applyProject(JSON.parse(raw));
+  } catch (err) {
+    console.warn('Could not restore local project:', err);
+    return false;
+  }
+}
+
+function restoreTelegramProject(callback) {
+  if (!(IS_TELEGRAM && tgVersionAtLeast('9.0') && TG.DeviceStorage && typeof TG.DeviceStorage.getItem === 'function')) {
+    callback(false);
+    return;
+  }
+  try {
+    TG.DeviceStorage.getItem(PROJECT_STORAGE_KEY, (err, raw) => {
+      if (err || !raw) { callback(false); return; }
+      try {
+        const ok = applyProject(JSON.parse(raw));
+        if (ok) localStorage.setItem(PROJECT_STORAGE_KEY, raw);
+        callback(ok);
+      } catch (_) { callback(false); }
+    });
+  } catch (_) { callback(false); }
+}
+
+function populateSamples() {
+  const selectors = [el('sampleSelect'), el('aqySampleSelect')].filter(Boolean);
+  selectors.forEach(select => {
+    select.innerHTML = '';
+    samples.forEach((s, i) => {
+      const o = document.createElement('option');
+      o.value = i;
+      o.textContent = s.name;
+      select.appendChild(o);
+    });
+    select.disabled = !samples.length;
+    if (selectedIndex >= 0 && selectedIndex < samples.length) select.value = String(selectedIndex);
+  });
+}
+
+function renderAnalyzerResult(result) {
+  if (!result || !result.calc.length) {
+    clearResult();
+    renderSummary();
+    return;
+  }
+  lastResults = result;
+  el('finalH2').textContent = result.final.umol.toFixed(3);
+  el('finalRate').textContent = result.final.rate.toFixed(3);
+  el('finalDosage').textContent = result.final.umolPerG.toFixed(3);
+  el('finalPPM').textContent = result.final.real.toFixed(3);
+  setStatus('Live');
+  drawChart(result);
+  drawRateChart();
+  renderSummary();
+}
+
+function loadSelectedSample() {
+  if (selectedIndex < 0 || !samples[selectedIndex]) {
+    clearResult();
+    populateSamples();
+    return;
+  }
+  const s = samples[selectedIndex];
+  el('mass').value = s.mass;
+  el('vol').value = s.vol;
+  el('temp').value = s.temp;
+  el('pressure').value = s.pressure;
+  setRows(s.rows);
+  populateSamples();
+  renderAnalyzerResult(calculateSample(s));
+  if (!el('aqyView').classList.contains('hidden')) calculateAQY(false);
+}
+
+function clearResult() {
+  el('finalH2').textContent = '—';
+  el('finalRate').textContent = '—';
+  el('finalDosage').textContent = '—';
+  el('finalPPM').textContent = '—';
+  setStatus('Ready', 'idle');
+  if (chart) { chart.destroy(); chart = null; }
+  if (rateChart) { rateChart.destroy(); rateChart = null; }
+}
+
+function saveCurrentToMemory() {
+  if (selectedIndex < 0) return;
+  samples[selectedIndex].mass = parseFloat(el('mass').value) || 0.05;
+  samples[selectedIndex].vol = parseFloat(el('vol').value) || 375;
+  samples[selectedIndex].temp = parseFloat(el('temp').value) || 298;
+  samples[selectedIndex].pressure = parseFloat(el('pressure').value) || 1;
+  samples[selectedIndex].rows = getRowsFromUI();
+  persistProject();
+}
+
+let sampleNameResolver = null;
+
+function closeSampleNameModal(value) {
+  const modal = el('sampleNameModal');
+  modal.classList.add('hidden');
+  document.body.style.overflow = '';
+  hideTelegramKeyboard();
+  if (sampleNameResolver) {
+    const resolve = sampleNameResolver;
+    sampleNameResolver = null;
+    resolve(value);
+  }
+}
+
+function requestSampleName() {
+  return new Promise(resolve => {
+    sampleNameResolver = resolve;
+    const modal = el('sampleNameModal');
+    const input = el('sampleNameInput');
+    input.value = '';
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    setTimeout(() => input.focus(), 50);
+  });
+}
+
+async function addSample() {
+  const name = await requestSampleName();
+  if (!name || !name.trim()) return;
+  saveCurrentToMemory();
+  samples.push({
+    id: uid(), name: name.trim(), mass: 0.05, vol: 375, temp: 298, pressure: 1, rows: []
+  });
+  selectedIndex = samples.length - 1;
+  populateSamples();
+  loadSelectedSample();
+  persistProject();
+  telegramHaptic('success');
+  showToast('Sample "' + name.trim() + '" added');
+}
+
+function linearRegression(points) {
+  const n = points.length;
+  if (n < 2) return { slope: 0, intercept: 0, r2: 0 };
+  const sx = points.reduce((a, p) => a + p.x, 0);
+  const sy = points.reduce((a, p) => a + p.y, 0);
+  const sxy = points.reduce((a, p) => a + p.x * p.y, 0);
+  const sx2 = points.reduce((a, p) => a + p.x * p.x, 0);
+  const slope = (n * sxy - sx * sy) / (n * sx2 - sx * sx || 1);
+  const intercept = (sy - slope * sx) / n;
+  const mean = sy / n;
+  const ssTot = points.reduce((a, p) => a + (p.y - mean) ** 2, 0);
+  const ssRes = points.reduce((a, p) => a + (p.y - (slope * p.x + intercept)) ** 2, 0);
+  return { slope, intercept, r2: ssTot ? 1 - ssRes / ssTot : 0 };
+}
+
+function calculateSample(s) {
+  const rows = s.rows;
+  if (!rows.length) return null;
+  const baseline = rows[0].ppm;
+  const calc = rows.map((r, index) => {
+    const real = index === 0 ? 0 : Math.max(0, r.ppm - baseline);
+    const v_mL = (real / 10000) * s.vol;
+    const n = s.pressure * (v_mL / 1000) / (R * s.temp);
+    const umol = n * 1e6;
+    const time_h = r.time / 60;
+    const rate = time_h > 0 ? umol / (s.mass * time_h) : 0;
+    return { ...r, real, umol, rate };
+  });
+  const last = calc[calc.length - 1];
+  calc.forEach(x => x.umolPerG = s.mass > 0 ? x.umol / s.mass : 0);
+  last.umolPerG = s.mass > 0 ? last.umol / s.mass : 0;
+  const fit = linearRegression(calc.map(x => ({ x: x.time / 60, y: x.umol })));
+  return {
+    sample: s.name, mass: s.mass, vol: s.vol, temp: s.temp, pressure: s.pressure,
+    baseline, calc, final: last, maxRate: Math.max(...calc.map(x => x.rate)),
+    linearRate: fit.slope / s.mass, productionPerGram: last.umol / s.mass, r2: fit.r2
+  };
+}
+
+function calculate() {
+  hideTelegramKeyboard();
+  saveCurrentToMemory();
+  if (selectedIndex < 0) {
+    setStatus('Add a sample', 'warn');
+    showToast('Please add a sample first', 'error');
+    return;
+  }
+  const result = calculateSample(samples[selectedIndex]);
+  if (!result || !result.calc.length) {
+    setStatus('Enter data', 'warn');
+    showToast('Enter time and ppm data first', 'error');
+    return;
+  }
+  lastResults = result;
+  el('finalH2').textContent = result.final.umol.toFixed(3);
+  el('finalRate').textContent = result.final.rate.toFixed(3);
+  el('finalDosage').textContent = result.final.umolPerG.toFixed(3);
+  el('finalPPM').textContent = result.final.real.toFixed(3);
+  setStatus('Calculated');
+  drawChart(result);
+  drawRateChart();
+  renderSummary();
+  telegramHaptic('success');
+  showToast('Calculation complete');
+}
+
+function renderSummary() {
+  const tbody = el('summaryBody');
+  tbody.innerHTML = '';
+  samples.forEach(s => {
+    const r = calculateSample(s);
+    if (!r) return;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${escapeHtml(r.sample)}</td>
+      <td>${r.final.umol.toFixed(3)}</td>
+      <td>${r.final.umolPerG.toFixed(3)}</td>
+      <td>${r.final.rate.toFixed(3)}</td>
+      <td>${r.final.real.toFixed(3)}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function chartDefaults() {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color: '#8b96a8', font: { family: 'Inter', size: 12 }, usePointStyle: true, boxWidth: 8, boxHeight: 8 } },
+      title: { display: true, color: '#eef2f8', font: { family: 'Inter', size: 13, weight: '600' }, padding: { bottom: 14 } },
+      tooltip: {
+        backgroundColor: '#131a28',
+        titleColor: '#eef2f8',
+        bodyColor: '#c3cbda',
+        borderColor: 'rgba(255,255,255,0.12)',
+        borderWidth: 1,
+        padding: 10,
+        cornerRadius: 8,
+        titleFont: { family: 'Inter', size: 12, weight: '600' },
+        bodyFont: { family: 'Inter', size: 12 },
+        displayColors: false
+      }
+    },
+    scales: {
+      x: {
+        title: { display: true, color: '#545e70', font: { size: 11 } },
+        ticks: { color: '#545e70', font: { size: 11 } },
+        grid: { color: 'rgba(255,255,255,0.045)' },
+        border: { color: 'rgba(255,255,255,0.08)' }
+      },
+      y: {
+        title: { display: true, color: '#545e70', font: { size: 11 } },
+        ticks: { color: '#545e70', font: { size: 11 } },
+        grid: { color: 'rgba(255,255,255,0.045)' },
+        border: { color: 'rgba(255,255,255,0.08)' }
+      }
+    }
+  };
+}
+
+function drawChart(result) {
+  const ctx = el('chart');
+  if (chart) chart.destroy();
+  const opts = chartDefaults();
+  opts.plugins.title.text = result.sample + ' — H₂ evolution';
+  opts.scales.x.title.text = 'Time (h)';
+  opts.scales.y.title.text = 'H₂ dosage (µmol/g)';
+  chart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: result.calc.map(x => (x.time / 60).toFixed(2)),
+      datasets: [{
+        label: 'H₂ dosage (µmol/g photocatalyst)',
+        data: result.calc.map(x => x.umol / result.mass),
+        borderColor: '#37c6f0',
+        backgroundColor: 'rgba(55,198,240,0.10)',
+        fill: true,
+        tension: 0.25,
+        pointRadius: 4,
+        pointHoverRadius: 6,
+        pointBackgroundColor: '#37c6f0',
+        pointBorderColor: '#05070c',
+        pointBorderWidth: 2,
+        borderWidth: 2
+      }]
+    },
+    options: opts
+  });
+}
+
+function drawRateChart() {
+  const ctx = el('rateChart');
+  if (rateChart) rateChart.destroy();
+  const valid = samples.map(s => calculateSample(s)).filter(r => r);
+  if (!valid.length) return;
+  const opts = chartDefaults();
+  opts.plugins.title.text = 'Final H₂ production rate by sample';
+  opts.plugins.legend.display = false;
+  opts.scales.y.title.text = 'µmol g⁻¹ h⁻¹';
+  rateChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: valid.map(r => r.sample),
+      datasets: [{
+        label: 'Final rate (µmol g⁻¹ h⁻¹)',
+        data: valid.map(r => r.final.rate),
+        backgroundColor: 'rgba(155,140,242,0.55)',
+        borderColor: '#9b8cf2',
+        borderWidth: 1.5,
+        borderRadius: 6,
+        borderSkipped: false
+      }]
+    },
+    options: opts
+  });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, m =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[m]));
+}
+
+function exportExcel() {
+  saveCurrentToMemory();
+  if (!samples.length) {
+    showToast('No samples to export', 'error');
+    return;
+  }
+  const wb = XLSX.utils.book_new();
+
+  const resultRows = [[
+    'Sample', 'Catalyst mass (g)', 'Gas volume (mL)', 'Temperature (K)', 'Pressure (atm)',
+    'Initial C0 ppm', 'Final GC ppm', 'Final corrected ppm',
+    'Final H₂ (µmol)', 'H₂ dosage (µmol/g)', 'Final rate (µmol g⁻¹ h⁻¹)',
+    'Linear rate (µmol g⁻¹ h⁻¹)', 'R²'
+  ]];
+  const rawRows = [[
+    'Sample', 'Time (min)', 'GC ppm', 'Initial C0 ppm', 'Real ppm',
+    'H₂ (µmol)', 'H₂ (µmol/g)', 'Rate (µmol g⁻¹ h⁻¹)'
+  ]];
+
+  let hasData = false;
+  samples.forEach(s => {
+    const r = calculateSample(s);
+    if (!r) return;
+    hasData = true;
+    resultRows.push([
+      r.sample, r.mass, r.vol, r.temp, r.pressure,
+      r.baseline, r.final.ppm, r.final.real,
+      r.final.umol, r.final.umolPerG, r.final.rate,
+      r.linearRate, r.r2
+    ]);
+    r.calc.forEach(x => rawRows.push([
+      r.sample, x.time, x.ppm, r.baseline, x.real,
+      x.umol, x.umol / r.mass, x.rate
+    ]));
+  });
+
+  if (!hasData) {
+    showToast('No calculated data to export', 'error');
+    return;
+  }
+
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resultRows), 'Results');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rawRows), 'Raw Data');
+
+  const conditions = [
+    ['H₂ PRODUCTION CALCULATION — CONDITIONS & METHOD', ''],
+    ['Purpose', 'Calculation of H₂ amount and normalized H₂ production rate from GC concentration (ppm) and time data.'],
+    ['Experimental procedure', 'Visible-light photocatalytic hydrogen production in a sealed gas circulation reactor. H₂ measured by calibrated GC/sensor during irradiation.'],
+    ['Measurement', 'H₂ concentration from calibrated sensor response, recorded as ppm. First measurement treated as baseline C₀.'],
+    ['User inputs', 'Sample name, time (min), H₂ concentration (ppm), photocatalyst mass (g).'],
+    ['Gas volume (mL)', parseFloat(el('vol').value) || 375],
+    ['Temperature (K)', parseFloat(el('temp').value) || 298],
+    ['Pressure (atm)', parseFloat(el('pressure').value) || 1],
+    ['Gas constant R', '0.0821 L·atm·mol⁻¹·K⁻¹'],
+    ['Baseline correction', 'First GC ppm reading = baseline C₀ for each sample.'],
+    ['Corrected concentration', 'C_real = C_GC − C₀ (negative values set to zero).'],
+    ['H₂ volume', 'V_H₂ = (C_real / 10000) × V_free'],
+    ['Molar amount', 'n(H₂) = P × V(L) / (R × T)'],
+    ['Amount conversion', 'H₂ (µmol) = n(H₂) × 10⁶'],
+    ['Time conversion', 't(h) = t(min) / 60'],
+    ['Normalized rate', 'Rate = H₂(µmol) / [mass(g) × t(h)]'],
+    ['Linear fitting', 'Slope of H₂(µmol) vs time(h), normalized by catalyst mass, with R².'],
+    ['Note', 'Calculation constants and equations are documented here for reproducibility.']
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(conditions), 'Conditions');
+
+  ['Results', 'Raw Data', 'Conditions'].forEach(name => {
+    const ws = wb.Sheets[name];
+    ws['!cols'] = [
+      { wch: 22 }, { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 14 },
+      { wch: 14 }, { wch: 14 }, { wch: 16 }, { wch: 16 }, { wch: 16 },
+      { wch: 18 }, { wch: 18 }, { wch: 10 }
+    ];
+  });
+
+  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  hideTelegramKeyboard();
+  deliverGeneratedFile(blob, 'H2_Production_Results.xlsx', blob.type);
+}
+
+function exportPDF() {
+  saveCurrentToMemory();
+  if (selectedIndex < 0) {
+    showToast('Select a sample first', 'error');
+    return;
+  }
+  const r = calculateSample(samples[selectedIndex]);
+  if (!r || !r.calc.length) {
+    showToast('Calculate data before exporting PDF', 'error');
+    return;
+  }
+
+  try {
+    if (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF) {
+      showToast('PDF library not loaded. Check internet connection.', 'error');
+      return;
+    }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const margin = 16;
+    let y = 18;
+
+    doc.setFillColor(12, 18, 32);
+    doc.rect(0, 0, pageW, 28, 'F');
+    doc.setTextColor(56, 189, 248);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text('Hydrogen Production Report', margin, 18);
+    doc.setFontSize(9);
+    doc.setTextColor(148, 163, 184);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Photocatalysis Research Toolkit', pageW - margin, 18, { align: 'right' });
+
+    y = 38;
+    doc.setTextColor(30, 41, 59);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.text(r.sample, margin, y);
+    y += 8;
+
+    doc.setDrawColor(226, 232, 240);
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(margin, y, pageW - 2 * margin, 42, 2, 2, 'FD');
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.setTextColor(71, 85, 105);
+
+    const summaryLines = [
+      ['Photocatalyst mass', r.mass + ' g'],
+      ['Initial C0 (baseline)', r.baseline.toFixed(2) + ' ppm'],
+      ['Final GC concentration', r.final.ppm.toFixed(2) + ' ppm'],
+      ['Final corrected H2', r.final.real.toFixed(2) + ' ppm'],
+      ['Final H2 amount', r.final.umol.toFixed(4) + ' umol'],
+      ['H2 dosage', r.productionPerGram.toFixed(4) + ' umol/g'],
+      ['Final rate', r.final.rate.toFixed(4) + ' umol g-1 h-1'],
+      ['Linear rate (R2 = ' + r.r2.toFixed(4) + ')', r.linearRate.toFixed(4) + ' umol g-1 h-1']
+    ];
+
+    const col1X = margin + 4;
+    const col2X = margin + 95;
+    let sy = y + 7;
+    summaryLines.forEach((pair, i) => {
+      const x = i < 4 ? col1X : col2X;
+      const row = i % 4;
+      const yy = sy + row * 8;
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(100, 116, 139);
+      doc.text(pair[0] + ':', x, yy);
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(15, 23, 42);
+      doc.text(pair[1], x + 48, yy);
+    });
+
+    y += 50;
+
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    const method = 'Method: C_real = GC ppm - C0; V_H2 = (C_real/10000) x V_free; n = PV/RT; amount in umol normalized by catalyst mass and time.';
+    doc.text(method, margin, y, { maxWidth: pageW - 2 * margin });
+    y += 10;
+
+    if (typeof doc.autoTable === 'function') {
+      const body = r.calc.map(x => [
+        x.time.toFixed(1),
+        x.ppm.toFixed(2),
+        x.real.toFixed(2),
+        x.umol.toFixed(4),
+        (x.umolPerG || 0).toFixed(4),
+        x.rate.toFixed(4)
+      ]);
+      doc.autoTable({
+        startY: y,
+        head: [['Time (min)', 'GC ppm', 'Real ppm', 'H2 (umol)', 'umol/g', 'Rate (umol g-1 h-1)']],
+        body: body,
+        margin: { left: margin, right: margin },
+        styles: {
+          fontSize: 8,
+          cellPadding: 3,
+          textColor: [30, 41, 59],
+          lineColor: [226, 232, 240],
+          lineWidth: 0.3
+        },
+        headStyles: {
+          fillColor: [12, 18, 32],
+          textColor: [226, 232, 240],
+          fontStyle: 'bold',
+          fontSize: 8
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252]
+        }
+      });
+      y = doc.lastAutoTable.finalY + 12;
+    } else {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(15, 23, 42);
+      doc.text('Data points', margin, y);
+      y += 6;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      r.calc.forEach(x => {
+        if (y > 270) { doc.addPage(); y = 20; }
+        doc.text(
+          't=' + x.time.toFixed(1) + ' min | GC=' + x.ppm.toFixed(2) + ' | real=' + x.real.toFixed(2) + ' | ' + x.umol.toFixed(4) + ' umol | rate=' + x.rate.toFixed(4),
+          margin, y
+        );
+        y += 5;
+      });
+      y += 8;
+    }
+
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(7);
+      doc.setTextColor(148, 163, 184);
+      doc.text(
+        'Generated by H2 Production Analyzer  ·  Page ' + i + ' of ' + pageCount,
+        pageW / 2, 287, { align: 'center' }
+      );
+    }
+
+    const safeName = r.sample.replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '') || 'Sample';
+    const filename = 'H2_Report_' + safeName + '.pdf';
+    const blob = doc.output('blob');
+    hideTelegramKeyboard();
+    deliverGeneratedFile(blob, filename, 'application/pdf');
+  } catch (err) {
+    console.error('PDF export error:', err);
+    showToast('PDF export failed: ' + (err.message || 'unknown error'), 'error');
+  }
+}
+
+
+const AQY_CONSTANTS = Object.freeze({
+  wavelength: 450e-9,
+  power: 30.30,
+  lamps: 2,
+  distance: 8,
+  illuminatedArea: 80,
+  angle: 120,
+  h: 6.626e-34,
+  c: 3e8,
+  NA: 6.022e23
+});
+let lastAQYReport = null;
+
+function setAQYStatus(text, state = 'ok') {
+  const s = el('aqyStatus');
+  if (!s) return;
+  s.textContent = text;
+  s.className = 'pill' + (state === 'idle' ? ' idle' : state === 'warn' ? ' warn' : '');
+}
+
+function sci(value, digits = 4) {
+  return Number(value).toExponential(digits);
+}
+
+function getAQYSourceData() {
+  saveCurrentToMemory();
+  if (selectedIndex < 0 || !samples[selectedIndex]) return null;
+  const sample = samples[selectedIndex];
+  const result = calculateSample(sample);
+  if (!result || !result.calc.length) return null;
+  return {
+    sample: result.sample,
+    mass: result.mass,
+    rate: result.final.rate,
+    lastPpm: result.final.ppm,
+    correctedPpm: result.final.real,
+    finalH2Umol: result.final.umol,
+    timeMin: result.final.time
+  };
+}
+
+function calculateAQY(showMessage = true) {
+  const source = getAQYSourceData();
+  if (!source || !Number.isFinite(source.rate) || !Number.isFinite(source.mass) || source.mass <= 0) {
+    el('aqySample').textContent = selectedIndex >= 0 && samples[selectedIndex] ? samples[selectedIndex].name : '—';
+    el('aqyRate').textContent = '—';
+    el('aqyMass').textContent = selectedIndex >= 0 && samples[selectedIndex] ? samples[selectedIndex].mass : '—';
+    el('aqyValue').textContent = '—';
+    el('aqyIntermediate').textContent = 'H₂ mol/h: —  •  Photon input: —';
+    el('aqyNote').textContent = 'Add valid time and H₂ (ppm) values in Manual Data Entry first.';
+    el('aqyPdfBtn').disabled = true;
+    lastAQYReport = null;
+    setAQYStatus('Waiting for data', 'warn');
+    if (showMessage) showToast('AQY needs valid Manual Data Entry rows', 'error');
+    return null;
+  }
+
+  const { wavelength, power, lamps, distance, illuminatedArea, angle, h, c, NA } = AQY_CONSTANTS;
+  const photonEnergy = h * c / wavelength;
+  const photonSec = power / photonEnergy;
+  const photonMolHour = photonSec * 3600 / NA;
+  const radius = distance * Math.tan((angle / 2) * Math.PI / 180);
+  const totalArea = Math.PI * radius * radius * lamps;
+  const photonSample = photonMolHour * (illuminatedArea / totalArea);
+  const h2Mol = source.rate * source.mass / 1000000;
+  const aqy = (2 * h2Mol / photonSample) * 100;
+
+  el('aqySample').textContent = source.sample;
+  el('aqyRate').textContent = source.rate.toFixed(3);
+  el('aqyMass').textContent = source.mass.toFixed(4);
+  el('aqyValue').textContent = aqy.toFixed(4) + ' %';
+  el('aqyIntermediate').textContent = 'H₂ mol/h: ' + sci(h2Mol, 4) + '  •  Photon input: ' + sci(photonSample, 4) + ' mol photon/h';
+  el('aqyNote').innerHTML = 'AQY uses the <b>final calculated H₂ production rate</b> (' + source.rate.toFixed(3) + ' µmol g⁻¹ h⁻¹) from the last valid Manual Data Entry row (' + source.timeMin + ' min), together with the synchronized photocatalyst mass.';
+  el('aqyPdfBtn').disabled = false;
+  setAQYStatus('Calculated');
+
+  lastAQYReport = {
+    ...source,
+    ...AQY_CONSTANTS,
+    photonEnergy,
+    photonSec,
+    photonMolHour,
+    radius,
+    totalArea,
+    photonSample,
+    h2Mol,
+    aqy,
+    calculatedAt: new Date().toLocaleString()
+  };
+  if (showMessage) showToast('AQY calculation complete');
+  return lastAQYReport;
+}
+
+function exportAQYPDF() {
+  const report = lastAQYReport || calculateAQY(false);
+  if (!report) return;
+  try {
+    if (typeof window.jspdf === 'undefined' || !window.jspdf.jsPDF) {
+      showToast('PDF library not loaded. Check internet connection.', 'error');
+      return;
+    }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const left = 16;
+    const right = 16;
+    const maxWidth = pageWidth - left - right;
+    let y = 18;
+
+    function addTitle(text, size = 18) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(size);
+      doc.setTextColor(15, 23, 42);
+      doc.text(text, left, y);
+      y += 8;
+    }
+    function addSub(text) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(90, 90, 90);
+      const lines = doc.splitTextToSize(text, maxWidth);
+      doc.text(lines, left, y);
+      y += lines.length * 5 + 2;
+    }
+    function addSection(title) {
+      if (y > 265) { doc.addPage(); y = 18; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(15, 23, 42);
+      doc.text(title, left, y);
+      y += 7;
+    }
+    function addLine(label, value) {
+      if (y > 275) { doc.addPage(); y = 18; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10.5);
+      doc.setTextColor(30, 41, 59);
+      doc.text(label, left, y);
+      doc.setFont('helvetica', 'normal');
+      const labelWidth = 62;
+      const lines = doc.splitTextToSize(String(value), maxWidth - labelWidth);
+      doc.text(lines, left + labelWidth, y);
+      y += Math.max(6, lines.length * 5);
+    }
+    function addParagraph(text) {
+      if (y > 270) { doc.addPage(); y = 18; }
+      doc.setFont('courier', 'normal');
+      doc.setFontSize(10);
+      doc.setTextColor(30, 41, 59);
+      const lines = doc.splitTextToSize(text, maxWidth);
+      doc.text(lines, left, y);
+      y += lines.length * 5 + 2;
+    }
+
+    addTitle('AQY Calculation Report');
+    addSub('Integrated module of Hydrogen Production Analyzer');
+    addLine('Report date:', report.calculatedAt);
+    addLine('Sample:', report.sample);
+
+    addSection('AQY Input Data (linked from analyzer)');
+    addLine('Final H2 production rate:', report.rate.toFixed(6) + ' umol g^-1 h^-1');
+    addLine('Photocatalyst mass:', report.mass + ' g');
+    addLine('Source measurement time:', report.timeMin + ' min');
+
+    addSection('Fixed Constants Used');
+    addLine('Wavelength (lambda):', '450 nm');
+    addLine('Lamp power:', report.power + ' W');
+    addLine('Number of lamps:', String(report.lamps));
+    addLine('Distance:', report.distance + ' cm');
+    addLine('Illuminated area:', report.illuminatedArea + ' cm^2');
+    addLine('Beam angle:', report.angle + ' degree');
+    addLine('Planck constant (h):', sci(report.h, 4) + ' J.s');
+    addLine('Speed of light (c):', sci(report.c, 4) + ' m/s');
+    addLine('Avogadro number (NA):', sci(report.NA, 4) + ' mol^-1');
+
+    addSection('Equations');
+    addParagraph('1) Photon energy: E = h x c / lambda');
+    addParagraph('2) Photon flux per hour: photon mol/h = (Power / E) x 3600 / NA');
+    addParagraph('3) Illuminated radius: r = distance x tan(angle/2)');
+    addParagraph('4) Total illuminated area: A_total = pi x r^2 x lamps');
+    addParagraph('5) Photon input to sample: photon_sample = photon mol/h x (illuminated area / A_total)');
+    addParagraph('6) H2 production in mol/h: H2 mol/h = rate x mass / 1,000,000');
+    addParagraph('7) AQY (%): AQY = (2 x H2 mol/h / photon_sample) x 100');
+
+    addSection('Step-by-Step Calculation');
+    addLine('Photon energy (E):', sci(report.photonEnergy, 6) + ' J');
+    addLine('Photons per second:', sci(report.photonSec, 6) + ' photons/s');
+    addLine('Photon flux per hour:', sci(report.photonMolHour, 6) + ' mol photon/h');
+    addLine('Beam radius:', report.radius.toFixed(6) + ' cm');
+    addLine('Total illuminated area:', report.totalArea.toFixed(6) + ' cm^2');
+    addLine('Photon input to sample:', sci(report.photonSample, 6) + ' mol photon/h');
+    addLine('H2 production:', sci(report.h2Mol, 6) + ' mol/h');
+
+    addSection('Final Result');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.setTextColor(15, 23, 42);
+    doc.text('AQY = ' + report.aqy.toFixed(4) + ' %', left, y);
+
+    const safeName = report.sample.replace(/[^a-z0-9]+/gi, '_').replace(/^_|_$/g, '') || 'Sample';
+    const filename = 'AQY_Report_' + safeName + '.pdf';
+    const blob = doc.output('blob');
+    hideTelegramKeyboard();
+    deliverGeneratedFile(blob, filename, 'application/pdf');
+  } catch (err) {
+    console.error('AQY PDF export error:', err);
+    showToast('AQY PDF export failed: ' + (err.message || 'unknown error'), 'error');
+  }
+}
+
+function showTool(view) {
+  const aqy = view === 'aqy';
+  el('analyzerView').classList.toggle('hidden', aqy);
+  el('aqyView').classList.toggle('hidden', !aqy);
+  el('analyzerTab').classList.toggle('active', !aqy);
+  el('aqyTab').classList.toggle('active', aqy);
+  if (IS_TELEGRAM && TG.BackButton) {
+    try { aqy ? TG.BackButton.show() : TG.BackButton.hide(); } catch (_) {}
+  }
+  if (aqy) calculateAQY(false);
+  window.scrollTo({ top: 0, behavior: 'auto' });
+}
+
+function liveUpdate() {
+  saveCurrentToMemory();
+  if (selectedIndex < 0 || !samples[selectedIndex]) return;
+  renderAnalyzerResult(calculateSample(samples[selectedIndex]));
+  if (!el('aqyView').classList.contains('hidden')) calculateAQY(false);
+}
+
+function selectSampleFromMenu(value) {
+  saveCurrentToMemory();
+  const next = parseInt(value, 10);
+  if (!Number.isInteger(next) || next < 0 || next >= samples.length) return;
+  selectedIndex = next;
+  persistProject();
+  loadSelectedSample();
+}
+
+['mass', 'vol', 'temp', 'pressure'].forEach(id => {
+  el(id).addEventListener('input', liveUpdate);
+});
+
+el('sampleNameCancel').addEventListener('click', () => closeSampleNameModal(null));
+el('sampleNameSave').addEventListener('click', () => closeSampleNameModal(el('sampleNameInput').value));
+el('sampleNameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); closeSampleNameModal(e.currentTarget.value); }
+  if (e.key === 'Escape') { e.preventDefault(); closeSampleNameModal(null); }
+});
+el('sampleNameModal').addEventListener('click', e => { if (e.target === e.currentTarget) closeSampleNameModal(null); });
+
+el('addSampleBtn').addEventListener('click', addSample);
+el('sampleSelect').addEventListener('change', e => selectSampleFromMenu(e.target.value));
+el('aqySampleSelect').addEventListener('change', e => selectSampleFromMenu(e.target.value));
+el('saveSampleBtn').addEventListener('click', () => {
+  saveCurrentToMemory();
+  renderSummary();
+  setStatus('Saved');
+  showToast('Sample saved');
+});
+el('deleteSampleBtn').addEventListener('click', () => {
+  if (selectedIndex < 0) return;
+  const name = samples[selectedIndex].name;
+  confirmAction('Delete sample "' + name + '"?', ok => {
+    if (!ok) return;
+    samples.splice(selectedIndex, 1);
+    if (samples.length) {
+      selectedIndex = Math.min(selectedIndex, samples.length - 1);
+    } else {
+      selectedIndex = -1;
+    }
+    populateSamples();
+    if (selectedIndex >= 0) loadSelectedSample();
+    else {
+      el('entryBody').innerHTML = '';
+      addDefaultRow();
+      clearResult();
+    }
+    renderSummary();
+    persistProject();
+    if (!el('aqyView').classList.contains('hidden')) calculateAQY(false);
+    telegramHaptic('warning');
+    showToast('Sample deleted');
+  });
+});
+el('addRowBtn').addEventListener('click', () => { addDefaultRow(); liveUpdate(); });
+el('entryBody').addEventListener('input', e => {
+  if (e.target.matches('.timeInput, .ppmInput')) liveUpdate();
+});
+el('entryBody').addEventListener('click', e => {
+  if (e.target.closest('.rowDelete')) setTimeout(liveUpdate, 0);
+});
+el('calculateBtn').addEventListener('click', calculate);
+el('excelBtn').addEventListener('click', exportExcel);
+el('pdfBtn').addEventListener('click', exportPDF);
+el('analyzerTab').addEventListener('click', () => showTool('analyzer'));
+el('aqyTab').addEventListener('click', () => showTool('aqy'));
+el('aqyCalcBtn').addEventListener('click', () => calculateAQY(true));
+el('aqyPdfBtn').addEventListener('click', exportAQYPDF);
+
+function finishBoot(restored) {
+  if (!restored) {
+    samples = [{ id: uid(), name: 'Sample 1', mass: 0.05, vol: 375, temp: 298, pressure: 1, rows: [] }];
+    selectedIndex = 0;
+    persistProject();
+  }
+  populateSamples();
+  loadSelectedSample();
+  showTool('analyzer');
+}
+
+initTelegramMiniApp();
+if (restoreProject()) {
+  finishBoot(true);
+} else {
+  restoreTelegramProject(finishBoot);
+}
+
+window.addEventListener('pagehide', () => {
+  saveCurrentToMemory();
+  persistProject(true);
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    saveCurrentToMemory();
+    persistProject(true);
+  }
+});
+
+</script>
+</body>
+</html>
