@@ -1,0 +1,15 @@
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+  force = true
+
+[[headers]]
+  for = "/.netlify/functions/export-download"
+  [headers.values]
+    Access-Control-Allow-Origin = "https://web.telegram.org"
+    X-Content-Type-Options = "nosniff"
