@@ -1113,18 +1113,77 @@ function setupExportBridgeMessaging() {
   try { window.opener.postMessage({ type: 'H2_EXPORT_BRIDGE_READY', id }, window.location.origin); } catch (_) {}
 }
 
-function deliverGeneratedFile(blob, filename, mimeType) {
-  const finalBlob = blob.type ? blob : new Blob([blob], { type: mimeType || 'application/octet-stream' });
+async function blobToBase64(blob) {
+  const buffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
 
-  // Telegram Web runs Mini Apps inside a browser iframe. Use a normal top-level
-  // Chrome tab as a download bridge so iframe download restrictions do not eat the file.
+async function uploadExportForTelegram(blob, filename, mimeType) {
+  // Vercel Functions currently cap request bodies at 4.5 MB. Base64 adds overhead,
+  // so keep a conservative raw-file ceiling and use browser fallbacks above it.
+  const MAX_NATIVE_EXPORT_BYTES = 3 * 1024 * 1024;
+  if (blob.size > MAX_NATIVE_EXPORT_BYTES) {
+    throw new Error('This export is too large for the native Telegram download route.');
+  }
+
+  const base64 = await blobToBase64(blob);
+  const response = await fetch('/api/export-upload', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fileName: filename,
+      mimeType: mimeType || blob.type || 'application/octet-stream',
+      data: base64
+    })
+  });
+
+  let payload = null;
+  try { payload = await response.json(); } catch (_) {}
+  if (!response.ok || !payload || !payload.downloadUrl) {
+    throw new Error((payload && payload.error) || 'Could not prepare the download on Vercel.');
+  }
+  return new URL(payload.downloadUrl, window.location.origin).href;
+}
+
+async function deliverGeneratedFile(blob, filename, mimeType) {
+  const finalBlob = blob.type ? blob : new Blob([blob], { type: mimeType || 'application/octet-stream' });
+  const finalMime = finalBlob.type || mimeType || 'application/octet-stream';
+
+  // Preferred path on Telegram 8.0+: upload the generated file to a short-lived
+  // Vercel Blob URL, then let Telegram display its native download prompt.
+  if (IS_TELEGRAM && tgVersionAtLeast('8.0') && typeof TG.downloadFile === 'function') {
+    hideTelegramKeyboard();
+    showToast('Preparing Telegram download…');
+    try {
+      const downloadUrl = await uploadExportForTelegram(finalBlob, filename, finalMime);
+      TG.downloadFile({ url: downloadUrl, file_name: filename }, accepted => {
+        if (accepted) {
+          showToast('Download started');
+          telegramHaptic('success');
+        } else {
+          showToast('Download cancelled', 'error');
+        }
+      });
+      return;
+    } catch (err) {
+      console.error('Native Telegram export failed:', err);
+      showToast('Native download unavailable; using browser fallback…', 'error');
+    }
+  }
+
+  // Telegram Web fallback for older clients or when the Vercel export service is unavailable.
   if (IS_TELEGRAM_WEB) {
-    openTelegramWebExportBridge(finalBlob, filename, mimeType || finalBlob.type);
-    return;
+    if (openTelegramWebExportBridge(finalBlob, filename, finalMime)) return;
   }
 
   let file = null;
-  try { file = new File([finalBlob], filename, { type: finalBlob.type || mimeType || 'application/octet-stream' }); } catch (_) {}
+  try { file = new File([finalBlob], filename, { type: finalMime }); } catch (_) {}
 
   if (file && navigator.share && navigator.canShare) {
     try {
